@@ -10,7 +10,7 @@ func Register(router fiber.Router, h *handler.Handler) {
 		return h.Set(c)
 	})
 
-	router.Get("/get/:key", func(c *fiber.Ctx) error {
+	router.Get("/get", func(c *fiber.Ctx) error {
 		return h.Get(c)
 	})
 
@@ -20,6 +20,14 @@ func Register(router fiber.Router, h *handler.Handler) {
 
 	router.Get("/get/all", func(c *fiber.Ctx) error {
 		return h.GetAll(c)
+	})
+
+	router.Get("/keys/all", func(c *fiber.Ctx) error {
+		return h.GetAllKeys(c)
+	})
+
+	router.Get("/values/all", func(c *fiber.Ctx) error {
+		return h.GetAllValues(c)
 	})
 
 	router.Get("/", func(c *fiber.Ctx) error {

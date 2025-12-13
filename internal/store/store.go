@@ -39,7 +39,7 @@ func (s *Store) Delete(key string) bool {
 	return exists
 }
 
-func (s *Store) GetAll(key string) map[string]string {
+func (s *Store) GetAll() map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

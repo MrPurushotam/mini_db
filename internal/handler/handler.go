@@ -37,11 +37,20 @@ func (h *Handler) Get(c *fiber.Ctx) error {
 }
 
 func (h *Handler) GetAll(c *fiber.Ctx) error {
-	key := c.Query("key")
-	values := h.Store.GetAll(key)
-	if len(values)!=0 {
-		return c.Status(400).JSON(fiber.Map{"status": "error", "message": "Not found"})
+	values := h.Store.GetAll()
+	if len(values) == 0 {
+		return c.Status(200).JSON(fiber.Map{"status": "success", "message": "Db is empty."})
 	}
+	return c.Status(200).JSON(fiber.Map{"status": "success", "values": values})
+}
+
+func (h *Handler) GetAllKeys(c *fiber.Ctx) error {
+	keys := h.Store.GetAllKeys()
+	return c.Status(200).JSON(fiber.Map{"status": "success", "keys": keys})
+}
+
+func (h *Handler) GetAllValues(c *fiber.Ctx) error {
+	values := h.Store.GetAllValues()
 	return c.Status(200).JSON(fiber.Map{"status": "success", "values": values})
 }
 
