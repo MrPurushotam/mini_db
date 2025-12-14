@@ -3,9 +3,10 @@ package routes
 import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/mrpurushotam/mini_database/internal/handler"
+	"github.com/mrpurushotam/mini_database/internal/logger"
 )
 
-func Register(router fiber.Router, h *handler.Handler) {
+func Register(router fiber.Router, h *handler.Handler, logger logger.Logger) {
 	router.Post("/set", func(c *fiber.Ctx) error {
 		return h.Set(c)
 	})
