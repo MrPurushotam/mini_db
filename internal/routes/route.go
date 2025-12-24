@@ -20,7 +20,7 @@ func Register(router fiber.Router, h *handler.Handler, logger logger.Logger) {
 	})
 
 	router.Get("/get/all", func(c *fiber.Ctx) error {
-		return h.GetAll(c)
+		return h.GetAll(c) 
 	})
 
 	router.Get("/keys/all", func(c *fiber.Ctx) error {

@@ -10,10 +10,7 @@ type Config struct {
 }
 
 func LoadConfig() *Config {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "3000"
-	}
+	port := getEnv("PORT", "3000")
 	logLevel := getEnv("LOG_LEVEL", "info")
 
 	return &Config{

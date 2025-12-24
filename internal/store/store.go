@@ -2,14 +2,16 @@ package store
 
 import (
 	"sync"
-
+	"github.com/mrpurushotam/mini_database/internal/aof"
 	"github.com/mrpurushotam/mini_database/internal/logger"
 )
 
 type Store struct {
-	mu     sync.RWMutex
-	data   map[string]string
-	logger logger.Logger
+	mu        sync.RWMutex
+	data      map[string]string
+	logger    logger.Logger
+	aof       *aof.AOF
+	enableAof bool
 }
 
 func NewStore(l logger.Logger) *Store {
@@ -19,12 +21,26 @@ func NewStore(l logger.Logger) *Store {
 	}
 }
 
-func (s *Store) Set(key, value string) {
+func (s *Store) EnableAOF(aofInstance *aof.AOF) {
+	s.aof = aofInstance
+	if aofInstance != nil {
+		s.enableAof = true
+	}
+}
+
+func (s *Store) Set(key, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.data[key] = value
+
+	if s.aof != nil {
+		if err := s.aof.Write("SET", key, value); err != nil {
+			return err
+		}
+	}
 	s.logger.Debug("Set operation", "key", key, "Value", value)
+	return nil
 }
 
 func (s *Store) Get(key string) (string, bool) {
@@ -36,7 +52,7 @@ func (s *Store) Get(key string) (string, bool) {
 	return value, exists
 }
 
-func (s *Store) Delete(key string) bool {
+func (s *Store) Delete(key string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -44,10 +60,17 @@ func (s *Store) Delete(key string) bool {
 	if exists {
 		delete(s.data, key)
 		s.logger.Info("Deleted key", "key", key)
+
+		if s.aof != nil {
+			if err := s.aof.Write("DELETE", key, ""); err != nil {
+				return false, err
+			}
+		}
+
 	} else {
 		s.logger.Warn("Attempted to delete non-existent key", "key", key)
 	}
-	return exists
+	return exists, nil
 }
 
 func (s *Store) GetAll() map[string]string {
@@ -84,4 +107,23 @@ func (s *Store) GetAllValues() []string {
 	}
 	s.logger.Debug("GetAllValues operation", "count", len(values))
 	return values
+}
+
+func (s *Store) LoadFromAOF(filepath string) error {
+	tempAOF := &aof.AOF{}
+
+	operations, err := tempAOF.Read(filepath)
+	if err != nil {
+		return err
+	}
+
+	for _, op := range operations {
+		switch op.Type {
+		case "SET":
+			s.data[op.Key] = op.Value
+		case "DELETE":
+			delete(s.data, op.Key)
+		}
+	}
+	return nil
 }
