@@ -15,35 +15,32 @@ import (
 )
 
 func main() {
-
 	cfg := config.LoadConfig()
 	app := fiber.New()
 	app.Use(fiberLogger.New())
 
-	appLogger := logger.NewStdLogger(os.Stdout, "mini_db: ", cfg.LogLevel)
+	logger.Init(os.Stdout, "mini_db: ", cfg.LogLevel)
 
-	aofFile, err := aof.NewAOF("database.aof")
+	aofFile, err := aof.NewAOF(cfg.AOF_FILENAME)
 	if err != nil {
-		log.Fatalf("Failed to create AOF: %v", err)
+		logger.Error("Failed to create AOF", "error", err)
 	}
 	defer aofFile.Close()
 
-	store := store.NewStore(appLogger)
-	appLogger.Info("Store initalized", "keys", len(store.GetAllKeys()))
+	store := store.NewStore()
+	logger.Info("Store initalized")
 
-	log.Println("Loading data from AOF...")
-	if err := store.LoadFromAOF("database.aof"); err != nil {
-		log.Fatalf("Failed to load AOF: %v", err)
+	if err := store.LoadFromAOF(cfg.AOF_FILENAME); err != nil {
+		logger.Error("Failed to load AOF", "error", err)
 	}
-	log.Println("AOF loaded successfully")
 
 	store.EnableAOF(aofFile)
-	
-	handler := handler.NewHandler(store, appLogger)
-	api := app.Group("/api/v0")
-	routes.Register(api, handler, appLogger)
-	appLogger.Info("Routes registered")
 
-	appLogger.Info("starting server on :%s", cfg.Port)
+	handler := handler.NewHandler(store)
+	api := app.Group("/api/v0")
+	routes.Register(api, handler)
+	logger.Info("Routes registered")
+
+	logger.Info("starting server on: ", "port", cfg.Port)
 	log.Fatal(app.Listen(":" + cfg.Port))
 }

@@ -11,10 +11,10 @@ import (
 type Level int
 
 const (
-	Debug Level = iota
-	Info
-	Warn
-	Error
+	LevelDebug Level = iota
+	LevelInfo
+	LevelWarn
+	LevelError
 )
 
 type Logger interface {
@@ -36,10 +36,10 @@ func NewStdLogger(w io.Writer, prefix, level string) Logger {
 	}
 }
 
-func (l *stdLogger) Debug(msg string, kv ...any) { l.log(Debug, msg, kv...) }
-func (l *stdLogger) Info(msg string, kv ...any)  { l.log(Info, msg, kv...) }
-func (l *stdLogger) Warn(msg string, kv ...any)  { l.log(Warn, msg, kv...) }
-func (l *stdLogger) Error(msg string, kv ...any) { l.log(Error, msg, kv...) }
+func (l *stdLogger) Debug(msg string, kv ...any) { l.log(LevelDebug, msg, kv...) }
+func (l *stdLogger) Info(msg string, kv ...any)  { l.log(LevelInfo, msg, kv...) }
+func (l *stdLogger) Warn(msg string, kv ...any)  { l.log(LevelWarn, msg, kv...) }
+func (l *stdLogger) Error(msg string, kv ...any) { l.log(LevelError, msg, kv...) }
 
 func (l *stdLogger) log(level Level, msg string, kv ...any) {
 	if level < l.level {
@@ -52,7 +52,7 @@ func (l *stdLogger) log(level Level, msg string, kv ...any) {
 
 	b.WriteString("[")
 	b.WriteString(levelString(level))
-	b.WriteString("]")
+	b.WriteString("] ")
 
 	b.WriteString(msg)
 
@@ -64,28 +64,61 @@ func (l *stdLogger) log(level Level, msg string, kv ...any) {
 	l.out.Println(b.String())
 }
 
+var L Logger = NewNopLogger()
+
+func Init(w io.Writer, prefix, level string) {
+	L = NewStdLogger(w, prefix, level)
+}
+
+func Debug(msg string, kv ...any) {
+	L.Debug(msg, kv...)
+}
+
+func Info(msg string, kv ...any) {
+	L.Info(msg, kv...)
+}
+
+func Warn(msg string, kv ...any) {
+	L.Warn(msg, kv...)
+}
+
+func Error(msg string, kv ...any) {
+	L.Error(msg, kv...)
+}
+
+type nopLogger struct{}
+
+func NewNopLogger() Logger {
+	return &nopLogger{}
+}
+
+func (n *nopLogger) Debug(string, ...any) {}
+func (n *nopLogger) Info(string, ...any)  {}
+func (n *nopLogger) Warn(string, ...any)  {}
+func (n *nopLogger) Error(string, ...any) {}
+
 func parseLevel(level string) Level {
 	switch strings.ToLower(level) {
 	case "debug":
-		return Debug
+		return LevelDebug
 	case "warn", "warning":
-		return Warn
+		return LevelWarn
 	case "error":
-		return Error
+		return LevelError
 	default:
-		return Info
+		return LevelInfo
 	}
 }
 
 func levelString(level Level) string {
 	switch level {
-	case Debug:
+	case LevelDebug:
 		return "DEBUG"
-	case Info:
+	case LevelInfo:
 		return "INFO"
-	case Warn:
+	case LevelWarn:
 		return "WARN"
-	case Error:
+	case LevelError:
 		return "ERROR"
 	default:
 		return "UNKNOWN"
@@ -104,7 +137,7 @@ func formatKV(kv []any) string {
 		}
 
 		b.WriteString(key)
-		b.WriteString("=")
+		b.WriteString(" = ")
 		b.WriteString(val)
 
 		if i+2 < len(kv) {

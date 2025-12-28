@@ -3,10 +3,9 @@ package routes
 import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/mrpurushotam/mini_database/internal/handler"
-	"github.com/mrpurushotam/mini_database/internal/logger"
 )
 
-func Register(router fiber.Router, h *handler.Handler, logger logger.Logger) {
+func Register(router fiber.Router, h *handler.Handler) {
 	router.Post("/set", func(c *fiber.Ctx) error {
 		return h.Set(c)
 	})
@@ -20,7 +19,7 @@ func Register(router fiber.Router, h *handler.Handler, logger logger.Logger) {
 	})
 
 	router.Get("/get/all", func(c *fiber.Ctx) error {
-		return h.GetAll(c) 
+		return h.GetAll(c)
 	})
 
 	router.Get("/keys/all", func(c *fiber.Ctx) error {
