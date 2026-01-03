@@ -7,7 +7,7 @@ import (
 )
 
 type Handler struct {
-	Store  *store.Store
+	Store *store.Store
 }
 
 type KeyValue struct {
@@ -21,11 +21,12 @@ func NewHandler(store *store.Store) *Handler {
 
 func (h *Handler) Set(c *fiber.Ctx) error {
 	var kv KeyValue
+
 	if err := c.BodyParser(&kv); err != nil {
 		logger.Error("Failed to parse Set request body", "error", err)
-
 		return c.Status(400).JSON(fiber.Map{"status": "error", "message": "Invalid body."})
 	}
+
 	h.Store.Set(kv.Key, kv.Value)
 	logger.Info("Key set successfully", "key", kv.Key, "value", kv.Value)
 	return c.Status(200).JSON(fiber.Map{"status": "success", "message": "ok"})
@@ -44,27 +45,19 @@ func (h *Handler) Get(c *fiber.Ctx) error {
 
 func (h *Handler) GetAll(c *fiber.Ctx) error {
 	values := h.Store.GetAll()
-	if len(values) == 0 {
-		logger.Info("GetAll: Database is empty.")
-
-		return c.Status(200).JSON(fiber.Map{"status": "success", "message": "Db is empty."})
-	}
 	logger.Info("Retrieved all values", "count", len(values))
-
-	return c.Status(200).JSON(fiber.Map{"status": "success", "values": values})
+	return c.Status(200).JSON(fiber.Map{"status": "success", "message": "Value fetched.", "values": values})
 }
 
 func (h *Handler) GetAllKeys(c *fiber.Ctx) error {
 	keys := h.Store.GetAllKeys()
 	logger.Info("Retrieved all keys", "count", len(keys))
-
 	return c.Status(200).JSON(fiber.Map{"status": "success", "keys": keys})
 }
 
 func (h *Handler) GetAllValues(c *fiber.Ctx) error {
 	values := h.Store.GetAllValues()
 	logger.Info("Retrieved all values (only values)", "count", len(values))
-
 	return c.Status(200).JSON(fiber.Map{"status": "success", "values": values})
 }
 
@@ -77,7 +70,6 @@ func (h *Handler) Delete(c *fiber.Ctx) error {
 	}
 	if !success {
 		logger.Warn("Failed to delete key, key not found", "key", key)
-
 		return c.Status(400).JSON(fiber.Map{"status": "error", "message": "Couldn't delete key value pair."})
 	}
 	logger.Info("Key deleted successfully", "key", key)

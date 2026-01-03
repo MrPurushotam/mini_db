@@ -33,12 +33,12 @@ func NewAOF(filepath string) (*AOF, error) {
 	return aof, nil
 }
 
-func (a *AOF) Write(operation, key, value string) error {
+func (a *AOF) Write(operation, key, valueType, value string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	line := fmt.Sprintf("%s %s %s\n", operation, key, value)
-	logger.Debug("writing to AOF", "operation", operation, "key", key)
+	line := fmt.Sprintf("%s %s %s %s\n", operation, key, valueType, value)
+	logger.Debug("writing to AOF", "operation", operation, "key", key, "valueType", valueType)
 
 	if _, err := a.writer.WriteString(line); err != nil {
 		logger.Error("failed to write to AOF", "error", err)
@@ -70,9 +70,10 @@ func (a *AOF) Close() error {
 }
 
 type Operation struct {
-	Type  string
-	Key   string
-	Value string
+	Type      string
+	Key       string
+	ValueType string
+	Value     string
 }
 
 func (a *AOF) Read(filepath string) ([]Operation, error) {
@@ -116,7 +117,7 @@ func (a *AOF) Read(filepath string) ([]Operation, error) {
 }
 
 func parseOperation(line string) (Operation, error) {
-	parts := strings.SplitN(line, " ", 3)
+	parts := strings.SplitN(line, " ", 4)
 	logger.Debug("parsing operation", "line", line, "partsCount", len(parts))
 
 	if len(parts) < 2 {
@@ -129,11 +130,12 @@ func parseOperation(line string) (Operation, error) {
 	}
 
 	if op.Type == "SET" {
-		if len(parts) != 3 {
-			return Operation{}, fmt.Errorf("SET operation missing value: %s", line)
+		if len(parts) != 4 {
+			return Operation{}, fmt.Errorf("SET operation missing value type or value: %s", line)
 		}
-		op.Value = parts[2]
+		op.ValueType = parts[2]
+		op.Value = parts[3]
 	}
-	logger.Debug("operation parsed", "type", op.Type, "key", op.Key, "valueLength", len(op.Value))
+	logger.Debug("operation parsed", "type", op.Type, "key", op.Key, "valueType", op.ValueType, "valueLength", len(op.Value))
 	return op, nil
 }
