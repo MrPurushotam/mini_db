@@ -137,8 +137,8 @@ func (h *Handler) SPop(c *fiber.Ctx) error {
 // --- List Operations ---
 
 type ListKeyValue struct {
-	Key    string
-	Values []string
+	Key   string   `json:"key"`
+	Value []string `json:"value"`
 }
 
 func (h *Handler) LPush(c *fiber.Ctx) error {
@@ -148,16 +148,16 @@ func (h *Handler) LPush(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"status": "error", "message": "Invalid Body"})
 	}
 
-	if req.Key == "" || len(req.Values) == 0 {
+	if req.Key == "" || len(req.Value) == 0 {
 		return c.Status(404).JSON(fiber.Map{"status": "error", "message": "Key and value are required"})
 	}
 
-	if err := h.Store.LPush(req.Key, req.Values...); err != nil {
+	if err := h.Store.LPush(req.Key, req.Value...); err != nil {
 		logger.Warn("LPUSH failed", "key", req.Key, "error", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "error", "message": err.Error()})
 	}
 
-	logger.Info("LPUSH success", "key", req.Key, "count", len(req.Values))
+	logger.Info("LPUSH success", "key", req.Key, "count", len(req.Value))
 	return c.Status(200).JSON(fiber.Map{"status": "success", "message": "ok"})
 }
 
@@ -168,16 +168,16 @@ func (h *Handler) RPush(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"status": "error", "message": "Invalid Body"})
 	}
 
-	if req.Key == "" || len(req.Values) == 0 {
+	if req.Key == "" || len(req.Value) == 0 {
 		return c.Status(404).JSON(fiber.Map{"status": "error", "message": "Key and value are required"})
 	}
 
-	if err := h.Store.RPush(req.Key, req.Values...); err != nil {
+	if err := h.Store.RPush(req.Key, req.Value...); err != nil {
 		logger.Warn("RPUSH failed", "key", req.Key, "error", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "error", "message": err.Error()})
 	}
 
-	logger.Info("RPUSH success", "key", req.Key, "count", len(req.Values))
+	logger.Info("RPUSH success", "key", req.Key, "count", len(req.Value))
 	return c.Status(200).JSON(fiber.Map{"status": "success", "message": "ok"})
 }
 

@@ -29,18 +29,18 @@ func main() {
 
 	store := store.NewStore()
 	logger.Info("Store initalized")
-
+	store.EnableAOF(aofFile)
+	
 	if err := store.LoadFromAOF(cfg.AOF_FILENAME); err != nil {
 		logger.Error("Failed to load AOF", "error", err)
 	}
 
-	store.EnableAOF(aofFile)
 
 	handler := handler.NewHandler(store)
 	api := app.Group("/api/v0")
 	routes.Register(api, handler)
 	logger.Info("Routes registered")
 
-	logger.Info("starting server on: ", "port", cfg.Port)
+	logger.Info("starting server", "port", cfg.Port)
 	log.Fatal(app.Listen(":" + cfg.Port))
 }
