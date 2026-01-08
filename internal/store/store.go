@@ -1,7 +1,9 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/mrpurushotam/mini_database/internal/aof"
@@ -143,7 +145,7 @@ func (s *Store) SPop(key string, members ...string) (int, error) {
 	removed := 0
 
 	for _, member := range members {
-		if _, exists := setVal.Data[key]; exists {
+		if _, exists := setVal.Data[member]; exists {
 			delete(setVal.Data, member)
 			removed++
 		}
@@ -181,6 +183,7 @@ func (s *Store) LPush(key string, values ...string) error {
 	listVal.Data = append(values, listVal.Data...)
 
 	if s.enableAof {
+		// LPUSH AOF command should write each value pushed
 		for _, v := range values {
 			if err := s.aof.Write("LPUSH", key, "list", v); err != nil {
 				return err
@@ -299,6 +302,7 @@ func (s *Store) Dequeue(key string) (string, error) {
 	queueVal.Data = queueVal.Data[1:]
 
 	if s.enableAof {
+		// DEQUEUE AOF command should only record the operation, not the dequeued value
 		if err := s.aof.Write("DEQUEUE", key, "queue", ""); err != nil {
 			return value, err
 		}
@@ -355,6 +359,7 @@ func (s *Store) Pop(key string) (string, error) {
 	stackVal.Data = stackVal.Data[:lastIdx]
 
 	if s.enableAof {
+		// POP AOF command should only record the operation, not the popped value
 		if err := s.aof.Write("POP", key, "stack", ""); err != nil {
 			return value, err
 		}
@@ -364,6 +369,11 @@ func (s *Store) Pop(key string) (string, error) {
 }
 
 // ===== HASHMAP OPERATIONS =====
+
+type HSetPayload struct {
+	Field string `json:"f"`
+	Value string `json:"v"`
+}
 
 func (s *Store) HSet(key, field, value string) error {
 	s.mu.Lock()
@@ -386,7 +396,16 @@ func (s *Store) HSet(key, field, value string) error {
 	hashVal.Data[field] = value
 
 	if s.enableAof {
-		if err := s.aof.Write("HSET", key, "hashmap", field+":"+value); err != nil {
+		payload := HSetPayload{
+			Field: field,
+			Value: value,
+		}
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+
+		if err := s.aof.Write("HSET", key, "hashmap", string(data)); err != nil {
 			return err
 		}
 	}
@@ -502,30 +521,87 @@ func (s *Store) LoadFromAOF(filepath string) error {
 
 	for _, op := range operations {
 		switch op.Type {
+
 		case "SET":
-			var value Value
-			switch op.ValueType {
-			case "string":
-				value = &StringValue{}
-			case "set":
-				value = &SetValue{}
-			case "list":
-				value = &ListValue{}
-			case "queue":
-				value = &QueueValue{}
-			case "stack":
-				value = &StackValue{}
-			case "hashmap":
-				value = &HashmapValue{}
-			default:
-				logger.Warn("Unknown value type in AOF", "key", op.Key, "valueType", op.ValueType)
-				continue
+			s.data[op.Key] = &StringValue{Data: op.Value}
+		case "SADD":
+			if _, exists := s.data[op.Key]; !exists {
+				s.data[op.Key] = &SetValue{Data: make(map[string]struct{})}
 			}
-			if err := value.Deserialize([]byte(op.Value)); err != nil {
-				logger.Error("Failed to deserialize value", "key", op.Key, "valueType", op.ValueType, "error", err)
-				continue
+			if SetValue, ok := s.data[op.Key].(*SetValue); ok {
+				SetValue.Data[op.Value] = struct{}{}
 			}
-			s.data[op.Key] = value
+		case "SPOP":
+			if val, exists := s.data[op.Key]; exists {
+				if SetValue, ok := val.(*SetValue); ok {
+					delete(SetValue.Data, op.Value)
+				}
+			}
+
+		case "LPUSH":
+			if _, exists := s.data[op.Key]; !exists {
+				s.data[op.Key] = &ListValue{Data: make([]string, 0)}
+			}
+			if ListValue, ok := s.data[op.Key].(*ListValue); ok {
+				ListValue.Data = append([]string{op.Value}, ListValue.Data...)
+			}
+		case "RPUSH":
+			if _, exists := s.data[op.Key]; !exists {
+				s.data[op.Key] = &ListValue{Data: make([]string, 0)}
+			}
+			if ListValue, ok := s.data[op.Key].(*ListValue); ok {
+				ListValue.Data = append(ListValue.Data, op.Value)
+			}
+
+		case "ENQUEUE":
+			if _, exists := s.data[op.Key]; !exists {
+				s.data[op.Key] = &QueueValue{Data: make([]string, 0)}
+			}
+			if queueValue, ok := s.data[op.Key].(*QueueValue); ok {
+				queueValue.Data = append(queueValue.Data, op.Value)
+			}
+
+		case "DEQUEUE":
+			if val, exists := s.data[op.Key]; exists {
+				if queueValue, ok := val.(*QueueValue); ok {
+					if len(queueValue.Data) > 0 {
+						queueValue.Data = queueValue.Data[1:]
+					}
+				}
+			}
+
+		case "PUSH":
+			if _, exists := s.data[op.Key]; !exists {
+				s.data[op.Key] = &StackValue{Data: make([]string, 0)}
+			}
+
+			if val, ok := s.data[op.Key].(*StackValue); ok {
+				val.Data = append(val.Data, op.Value)
+			}
+
+		case "POP":
+			if val, exists := s.data[op.Key]; exists {
+				if val, ok := val.(*StackValue); ok && len(val.Data) > 0 {
+					val.Data = val.Data[:len(val.Data)-1]
+				}
+			}
+
+		case "HSET":
+			if _, exists := s.data[op.Key]; !exists {
+				s.data[op.Key] = &HashmapValue{Data: make(map[string]string)}
+			}
+			if hashVal, ok := s.data[op.Key].(*HashmapValue); ok {
+				var payload HSetPayload
+				if err := json.Unmarshal([]byte(op.Value), &payload); err == nil {
+					hashVal.Data[payload.Field] = payload.Value
+				} else {
+					parts := strings.SplitN(op.Value, ":", 2)
+					if len(parts) == 2 {
+						hashVal.Data[parts[0]] = parts[1]
+					}
+				}
+			}
+
 		case "DELETE":
 			delete(s.data, op.Key)
 		}

@@ -264,7 +264,7 @@ func (h *Handler) Pop(c *fiber.Ctx) error {
 	if key == "" {
 		return c.Status(404).JSON(fiber.Map{"status": "error", "message": "Key is required"})
 	}
-	val, err := h.Store.Dequeue(key)
+	val, err := h.Store.Pop(key)
 	if err != nil {
 		logger.Warn("STACK POP failed", "key", key, "error", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "error", "message": err.Error()})
