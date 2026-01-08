@@ -125,16 +125,16 @@ func parseOperation(line string) (Operation, error) {
 	}
 
 	op := Operation{
-		Type: parts[0],
-		Key:  parts[1],
+		Type:      parts[0],
+		Key:       parts[1],
+		ValueType: parts[2],
+		Value:     parts[3],
 	}
 
 	if op.Type == "SET" {
 		if len(parts) != 4 {
 			return Operation{}, fmt.Errorf("SET operation missing value type or value: %s", line)
 		}
-		op.ValueType = parts[2]
-		op.Value = parts[3]
 	}
 	logger.Debug("operation parsed", "type", op.Type, "key", op.Key, "valueType", op.ValueType, "valueLength", len(op.Value))
 	return op, nil
