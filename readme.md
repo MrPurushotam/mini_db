@@ -1,11 +1,12 @@
 # Mini Database
 
-A simple, in-memory key-value store with data persistence, built with Go and the Fiber web framework. This project demonstrates a basic implementation of a database that can store string key-value pairs and recover its state from an Append Only File (AOF).
+A simple, in-memory data store with multiple data type support and persistence, built with Go and the Fiber web framework. This project demonstrates a basic implementation of a database that can store various key-value pair types (Strings, Sets, Lists, Queues, Stacks, Hashmaps) and recover its state from an Append Only File (AOF).
 
 ## Features
 
-- **In-Memory Storage**: Fast key-value operations.
+- **In-Memory Storage**: Fast key-value operations with support for multiple data types (String, Set, List, Queue, Stack, Hashmap).
 - **RESTful API**: Exposes endpoints for common database operations (Set, Get, Delete, GetAll, GetAllKeys, GetAllValues).
+- **Multiple Data Types**: Beyond simple strings, support for Sets, Lists, Queues, Stacks, and Hashmaps for more complex data structures.
 - **Append Only File (AOF) Persistence**: All write operations are logged to a file, allowing the database state to be reconstructed on startup.
 - **Configurable Logging**: Structured logging with different levels (Debug, Info, Warn, Error).
 - **Environment Variable Configuration**: Easy customization of port, log level, and AOF filename.
@@ -17,7 +18,11 @@ This project is primarily a learning exercise in Go programming, evolving throug
 
 - **v0: Basic Application**: Focused on building the fundamental in-memory key-value store with basic CRUD operations and a RESTful API.
 - **v1: AOF & Global Logger**: Introduced data persistence using an Append Only File (AOF) and integrated a custom global logger for better observability.
-- **v2 (Planned): Different Key-Value Pair Types**: Future plans include enhancing the store to support various key-value pair types beyond simple strings, allowing for more complex data structures.
+- **v2: Different Key-Value Pair Types**: Enhanced the store to support various key-value pair types beyond simple strings, including Sets, Lists, Queues, Stacks, and Hashmaps, allowing for more complex data structures.
+
+## Milestones
+
+- 🚀 **Current Focus**: Working on snapshot functionality for AOF file to optimize performance and reduce file size during heavy write operations.
 
 ## Getting Started
 
