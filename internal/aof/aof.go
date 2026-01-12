@@ -7,8 +7,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mrpurushotam/mini_database/internal/logger"
+	"github.com/mrpurushotam/mini_db/internal/domain"
+	"github.com/mrpurushotam/mini_db/internal/logger"
 )
+
+// StoreReader defines what AOF needs from the store (no import!)
+type StoreReader interface {
+	GetAll() map[string]domain.Value
+}
 
 type AOF struct {
 	file   *os.File
@@ -31,6 +37,81 @@ func NewAOF(filepath string) (*AOF, error) {
 
 	logger.Info("AOF initialized", "filepath", filepath)
 	return aof, nil
+}
+
+// Snapshot create a NewAof file with current state
+func (a *AOF) Snapshot(store StoreReader) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	logger.Info("Building AOF Snapshot...")
+
+	// Create a new temp file
+	originalPath := a.file.Name()
+	tempPath := originalPath + ".tmp"
+	tempFile, err := os.Create(tempPath)
+	if err != nil {
+		return fmt.Errorf("failed to create temp AOF: %w", err)
+	}
+	defer tempFile.Close()
+
+	tempWriter := bufio.NewWriter(tempFile)
+	snapshot := store.GetAll()
+
+	for key, value := range snapshot {
+		line := fmt.Sprintf("SET %s %s %s\n",
+			key,
+			value.Type(),
+			string(value.Serialize()))
+
+		if _, err := tempWriter.WriteString(line); err != nil {
+			tempFile.Close()
+			os.Remove(tempPath)
+			return fmt.Errorf("failed to write snapshot: %w", err)
+		}
+	}
+
+	if err := tempWriter.Flush(); err != nil {
+		tempFile.Close()
+		os.Remove(tempPath)
+		return err
+	}
+
+	if err := tempFile.Sync(); err != nil {
+		tempFile.Close()
+		os.Remove(tempPath)
+		return err
+	}
+
+	if err := tempFile.Close(); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to close temp AOF: %w", err)
+	}
+
+	if a.file != nil {
+		_ = a.writer.Flush()
+		_ = a.file.Close()
+	}
+
+	// remove original if it exists (allow rename to succeed on Windows)
+	if err := os.Remove(originalPath); err != nil && !os.IsNotExist(err) {
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to remove original AOF: %w", err)
+	}
+
+	if err := os.Rename(tempPath, originalPath); (err) != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to rename temp AOF: %w", err)
+	}
+
+	a.file, err = os.OpenFile(originalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to reopen AOF: %w", err)
+	}
+	a.writer = bufio.NewWriter(a.file)
+
+	logger.Info("AOF snapshot completed successfully")
+	return nil
 }
 
 func (a *AOF) Write(operation, key, valueType, value string) error {

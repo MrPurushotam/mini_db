@@ -2,8 +2,8 @@ package handler
 
 import (
 	"github.com/gofiber/fiber/v2"
-	"github.com/mrpurushotam/mini_database/internal/logger"
-	"github.com/mrpurushotam/mini_database/internal/store"
+	"github.com/mrpurushotam/mini_db/internal/logger"
+	"github.com/mrpurushotam/mini_db/internal/store"
 )
 
 type Handler struct {
@@ -332,4 +332,13 @@ func (h *Handler) HGetAll(c *fiber.Ctx) error {
 
 	logger.Info("HGETALL success", "key", key, "count", len(m))
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "success", "map": m})
+}
+
+func (h *Handler) Snapshot(c *fiber.Ctx) error {
+	if err := h.Store.Snapshot(); err != nil {
+		logger.Error("Failed to create AOF snapshot", "error", err)
+		return c.Status(500).JSON(fiber.Map{"status": "error", "message": "Failed to create snapshot: " + err.Error()})
+	}
+	logger.Info("AOF snapshot created successfully")
+	return c.Status(200).JSON(fiber.Map{"status": "success", "message": "Snapshot created successfully"})
 }

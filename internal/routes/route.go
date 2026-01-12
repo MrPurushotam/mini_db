@@ -2,7 +2,7 @@ package routes
 
 import (
 	"github.com/gofiber/fiber/v2"
-	"github.com/mrpurushotam/mini_database/internal/handler"
+	"github.com/mrpurushotam/mini_db/internal/handler"
 )
 
 func Register(router fiber.Router, h *handler.Handler) {
@@ -80,6 +80,10 @@ func Register(router fiber.Router, h *handler.Handler) {
 
 	router.Get("/HGETALL", func(c *fiber.Ctx) error {
 		return h.HGetAll(c)
+	})
+
+	router.Get("/snapshot", func(c *fiber.Ctx) error {
+		return h.Snapshot(c)
 	})
 
 	router.Get("/", func(c *fiber.Ctx) error {

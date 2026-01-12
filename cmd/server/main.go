@@ -3,15 +3,17 @@ package main
 import (
 	"log"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	fiberLogger "github.com/gofiber/fiber/v2/middleware/logger"
-	config "github.com/mrpurushotam/mini_database/internal"
-	"github.com/mrpurushotam/mini_database/internal/aof"
-	"github.com/mrpurushotam/mini_database/internal/handler"
-	"github.com/mrpurushotam/mini_database/internal/logger"
-	"github.com/mrpurushotam/mini_database/internal/routes"
-	"github.com/mrpurushotam/mini_database/internal/store"
+	config "github.com/mrpurushotam/mini_db/internal"
+	"github.com/mrpurushotam/mini_db/internal/aof"
+	"github.com/mrpurushotam/mini_db/internal/handler"
+	"github.com/mrpurushotam/mini_db/internal/logger"
+	"github.com/mrpurushotam/mini_db/internal/routes"
+	"github.com/mrpurushotam/mini_db/internal/store"
 )
 
 func main() {
@@ -25,21 +27,53 @@ func main() {
 	if err != nil {
 		logger.Error("Failed to create AOF", "error", err)
 	}
-	defer aofFile.Close()
+	defer func() {
+		if aofFile != nil {
+			aofFile.Close()
+		}
+	}()
 
 	store := store.NewStore()
-	logger.Info("Store initalized")
+	logger.Info("Store initialized")
 	store.EnableAOF(aofFile)
-	
+
 	if err := store.LoadFromAOF(cfg.AOF_FILENAME); err != nil {
 		logger.Error("Failed to load AOF", "error", err)
 	}
-
 
 	handler := handler.NewHandler(store)
 	api := app.Group("/api/v0")
 	routes.Register(api, handler)
 	logger.Info("Routes registered")
+
+	var wg sync.WaitGroup
+
+	if aofFile == nil {
+		logger.Info("AOF not initialized; auto-snapshot disabled")
+	} else {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			// initial snapshot at startup
+			if err := aofFile.Snapshot(store); err != nil {
+				logger.Error("Initial snapshot failed", "error", err)
+			} else {
+				logger.Info("Initial snapshot completed")
+			}
+
+			ticker := time.NewTicker(6 * time.Hour)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				if err := aofFile.Snapshot(store); err != nil {
+					logger.Error("Auto-snapshot failed", "error", err)
+				} else {
+					logger.Info("Auto-snapshot completed")
+				}
+			}
+		}()
+	}
 
 	logger.Info("starting server", "port", cfg.Port)
 	log.Fatal(app.Listen(":" + cfg.Port))

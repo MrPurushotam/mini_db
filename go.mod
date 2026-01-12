@@ -1,4 +1,4 @@
-module github.com/mrpurushotam/mini_database
+module github.com/mrpurushotam/mini_db
 
 go 1.24.5
 

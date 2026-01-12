@@ -6,20 +6,22 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mrpurushotam/mini_database/internal/aof"
-	"github.com/mrpurushotam/mini_database/internal/logger"
+	"github.com/mrpurushotam/mini_db/internal/aof"
+	"github.com/mrpurushotam/mini_db/internal/domain"
+	"github.com/mrpurushotam/mini_db/internal/logger"
+	DataTypeValue "github.com/mrpurushotam/mini_db/internal/value"
 )
 
 type Store struct {
 	mu        sync.RWMutex
-	data      map[string]Value
+	data      map[string]domain.Value
 	aof       *aof.AOF
 	enableAof bool
 }
 
 func NewStore() *Store {
 	return &Store{
-		data: make(map[string]Value),
+		data: make(map[string]domain.Value),
 	}
 }
 
@@ -32,7 +34,7 @@ func (s *Store) EnableAOF(aofInstance *aof.AOF) {
 	}
 }
 
-func (s *Store) checkType(key string, expectedType DataType) (Value, error) {
+func (s *Store) checkType(key string, expectedType domain.DataType) (domain.Value, error) {
 	val, exists := s.data[key]
 	if !exists {
 		return nil, fmt.Errorf("key not found")
@@ -48,7 +50,7 @@ func (s *Store) Set(key, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	stringValue := &StringValue{Data: value}
+	stringValue := &DataTypeValue.StringValue{Data: value}
 	s.data[key] = stringValue
 
 	if s.enableAof {
@@ -69,7 +71,7 @@ func (s *Store) Get(key string) (string, bool) {
 	if !exists {
 		return "", false
 	}
-	stringValue, ok := value.(*StringValue)
+	stringValue, ok := value.(*DataTypeValue.StringValue)
 	if !ok {
 		logger.Warn("Type mismatch: expected string", "key", key)
 		return "", false
@@ -85,14 +87,14 @@ func (s *Store) SAdd(key string, members ...string) error {
 	defer s.mu.Unlock()
 
 	val, exists := s.data[key]
-	var setVal *SetValue
+	var setVal *DataTypeValue.SetValue
 
 	if !exists {
-		setVal = &SetValue{Data: make(map[string]struct{})}
+		setVal = &DataTypeValue.SetValue{Data: make(map[string]struct{})}
 		s.data[key] = setVal
 	} else {
 		var ok bool
-		setVal, ok = val.(*SetValue)
+		setVal, ok = val.(*DataTypeValue.SetValue)
 		if !ok {
 			return fmt.Errorf("wrong type: expected set")
 		}
@@ -117,12 +119,12 @@ func (s *Store) SMembers(key string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	val, err := s.checkType(key, Set)
+	val, err := s.checkType(key, domain.Set)
 	if err != nil {
 		return nil, err
 	}
 
-	setVal := val.(*SetValue)
+	setVal := val.(*DataTypeValue.SetValue)
 	members := make([]string, 0, len(setVal.Data))
 
 	for member := range setVal.Data {
@@ -136,12 +138,12 @@ func (s *Store) SPop(key string, members ...string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	val, err := s.checkType(key, Set)
+	val, err := s.checkType(key, domain.Set)
 	if err != nil {
 		return 0, err
 	}
 
-	setVal := val.(*SetValue)
+	setVal := val.(*DataTypeValue.SetValue)
 	removed := 0
 
 	for _, member := range members {
@@ -168,14 +170,14 @@ func (s *Store) LPush(key string, values ...string) error {
 	defer s.mu.Unlock()
 
 	val, exists := s.data[key]
-	var listVal *ListValue
+	var listVal *DataTypeValue.ListValue
 
 	if !exists {
-		listVal = &ListValue{Data: make([]string, 0)}
+		listVal = &DataTypeValue.ListValue{Data: make([]string, 0)}
 		s.data[key] = listVal
 	} else {
 		var ok bool
-		listVal, ok = val.(*ListValue)
+		listVal, ok = val.(*DataTypeValue.ListValue)
 		if !ok {
 			return fmt.Errorf("wrong type: expected list")
 		}
@@ -198,14 +200,14 @@ func (s *Store) RPush(key string, values ...string) error {
 	defer s.mu.Unlock()
 
 	val, exists := s.data[key]
-	var listVal *ListValue
+	var listVal *DataTypeValue.ListValue
 
 	if !exists {
-		listVal = &ListValue{Data: make([]string, 0)}
+		listVal = &DataTypeValue.ListValue{Data: make([]string, 0)}
 		s.data[key] = listVal
 	} else {
 		var ok bool
-		listVal, ok = val.(*ListValue)
+		listVal, ok = val.(*DataTypeValue.ListValue)
 
 		if !ok {
 			return fmt.Errorf("wrong type: expected list")
@@ -227,12 +229,12 @@ func (s *Store) LRange(key string, start, stop int) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	val, err := s.checkType(key, List)
+	val, err := s.checkType(key, domain.List)
 	if err != nil {
 		return nil, err
 	}
 
-	listVal := val.(*ListValue)
+	listVal := val.(*DataTypeValue.ListValue)
 	length := len(listVal.Data)
 
 	if start < 0 {
@@ -261,14 +263,14 @@ func (s *Store) Enqueue(key, value string) error {
 	defer s.mu.Unlock()
 
 	val, exists := s.data[key]
-	var queueVal *QueueValue
+	var queueVal *DataTypeValue.QueueValue
 
 	if !exists {
-		queueVal = &QueueValue{Data: make([]string, 0)}
+		queueVal = &DataTypeValue.QueueValue{Data: make([]string, 0)}
 		s.data[key] = queueVal
 	} else {
 		var ok bool
-		queueVal, ok = val.(*QueueValue)
+		queueVal, ok = val.(*DataTypeValue.QueueValue)
 		if !ok {
 			return fmt.Errorf("wrong type: expected queue")
 		}
@@ -288,12 +290,12 @@ func (s *Store) Dequeue(key string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	val, err := s.checkType(key, Queue)
+	val, err := s.checkType(key, domain.Queue)
 	if err != nil {
 		return "", err
 	}
 
-	queueVal := val.(*QueueValue)
+	queueVal := val.(*DataTypeValue.QueueValue)
 	if len(queueVal.Data) == 0 {
 		return "", fmt.Errorf("queue is empty")
 	}
@@ -318,14 +320,14 @@ func (s *Store) Push(key, value string) error {
 	defer s.mu.Unlock()
 
 	val, exists := s.data[key]
-	var stackVal *StackValue
+	var stackVal *DataTypeValue.StackValue
 
 	if !exists {
-		stackVal = &StackValue{Data: make([]string, 0)}
+		stackVal = &DataTypeValue.StackValue{Data: make([]string, 0)}
 		s.data[key] = stackVal
 	} else {
 		var ok bool
-		stackVal, ok = val.(*StackValue)
+		stackVal, ok = val.(*DataTypeValue.StackValue)
 		if !ok {
 			return fmt.Errorf("wrong type: expected stack")
 		}
@@ -344,12 +346,12 @@ func (s *Store) Pop(key string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	val, err := s.checkType(key, Stack)
+	val, err := s.checkType(key, domain.Stack)
 	if err != nil {
 		return "", err
 	}
 
-	stackVal := val.(*StackValue)
+	stackVal := val.(*DataTypeValue.StackValue)
 	if len(stackVal.Data) == 0 {
 		return "", fmt.Errorf("stack is empty")
 	}
@@ -380,14 +382,14 @@ func (s *Store) HSet(key, field, value string) error {
 	defer s.mu.Unlock()
 
 	val, exists := s.data[key]
-	var hashVal *HashmapValue
+	var hashVal *DataTypeValue.HashmapValue
 
 	if !exists {
-		hashVal = &HashmapValue{Data: make(map[string]string)}
+		hashVal = &DataTypeValue.HashmapValue{Data: make(map[string]string)}
 		s.data[key] = hashVal
 	} else {
 		var ok bool
-		hashVal, ok = val.(*HashmapValue)
+		hashVal, ok = val.(*DataTypeValue.HashmapValue)
 		if !ok {
 			return fmt.Errorf("wrong type: expected hashmap")
 		}
@@ -416,12 +418,12 @@ func (s *Store) HGet(key, field string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	val, err := s.checkType(key, Hashmap)
+	val, err := s.checkType(key, domain.Hashmap)
 	if err != nil {
 		return "", err
 	}
 
-	hashVal := val.(*HashmapValue)
+	hashVal := val.(*DataTypeValue.HashmapValue)
 	value, exists := hashVal.Data[field]
 	if !exists {
 		return "", fmt.Errorf("field not found")
@@ -433,12 +435,12 @@ func (s *Store) HGetAll(key string) (map[string]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	val, err := s.checkType(key, Hashmap)
+	val, err := s.checkType(key, domain.Hashmap)
 	if err != nil {
 		return nil, err
 	}
 
-	hashVal := val.(*HashmapValue)
+	hashVal := val.(*DataTypeValue.HashmapValue)
 	result := make(map[string]string, len(hashVal.Data))
 	for k, v := range hashVal.Data {
 		result[k] = v
@@ -467,11 +469,11 @@ func (s *Store) Delete(key string) (bool, error) {
 	return exists, nil
 }
 
-func (s *Store) GetAll() map[string]Value {
+func (s *Store) GetAll() map[string]domain.Value {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make(map[string]Value, len(s.data))
+	result := make(map[string]domain.Value, len(s.data))
 	for k, v := range s.data {
 		result[k] = v
 	}
@@ -491,11 +493,11 @@ func (s *Store) GetAllKeys() []string {
 	return keys
 }
 
-func (s *Store) GetAllValues() []Value {
+func (s *Store) GetAllValues() []domain.Value {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	values := make([]Value, 0, len(s.data))
+	values := make([]domain.Value, 0, len(s.data))
 	for _, v := range s.data {
 		values = append(values, v)
 	}
@@ -523,47 +525,47 @@ func (s *Store) LoadFromAOF(filepath string) error {
 		switch op.Type {
 
 		case "SET":
-			s.data[op.Key] = &StringValue{Data: op.Value}
+			s.data[op.Key] = &DataTypeValue.StringValue{Data: op.Value}
 		case "SADD":
 			if _, exists := s.data[op.Key]; !exists {
-				s.data[op.Key] = &SetValue{Data: make(map[string]struct{})}
+				s.data[op.Key] = &DataTypeValue.SetValue{Data: make(map[string]struct{})}
 			}
-			if SetValue, ok := s.data[op.Key].(*SetValue); ok {
+			if SetValue, ok := s.data[op.Key].(*DataTypeValue.SetValue); ok {
 				SetValue.Data[op.Value] = struct{}{}
 			}
 		case "SPOP":
 			if val, exists := s.data[op.Key]; exists {
-				if SetValue, ok := val.(*SetValue); ok {
+				if SetValue, ok := val.(*DataTypeValue.SetValue); ok {
 					delete(SetValue.Data, op.Value)
 				}
 			}
 
 		case "LPUSH":
 			if _, exists := s.data[op.Key]; !exists {
-				s.data[op.Key] = &ListValue{Data: make([]string, 0)}
+				s.data[op.Key] = &DataTypeValue.ListValue{Data: make([]string, 0)}
 			}
-			if ListValue, ok := s.data[op.Key].(*ListValue); ok {
+			if ListValue, ok := s.data[op.Key].(*DataTypeValue.ListValue); ok {
 				ListValue.Data = append([]string{op.Value}, ListValue.Data...)
 			}
 		case "RPUSH":
 			if _, exists := s.data[op.Key]; !exists {
-				s.data[op.Key] = &ListValue{Data: make([]string, 0)}
+				s.data[op.Key] = &DataTypeValue.ListValue{Data: make([]string, 0)}
 			}
-			if ListValue, ok := s.data[op.Key].(*ListValue); ok {
+			if ListValue, ok := s.data[op.Key].(*DataTypeValue.ListValue); ok {
 				ListValue.Data = append(ListValue.Data, op.Value)
 			}
 
 		case "ENQUEUE":
 			if _, exists := s.data[op.Key]; !exists {
-				s.data[op.Key] = &QueueValue{Data: make([]string, 0)}
+				s.data[op.Key] = &DataTypeValue.QueueValue{Data: make([]string, 0)}
 			}
-			if queueValue, ok := s.data[op.Key].(*QueueValue); ok {
+			if queueValue, ok := s.data[op.Key].(*DataTypeValue.QueueValue); ok {
 				queueValue.Data = append(queueValue.Data, op.Value)
 			}
 
 		case "DEQUEUE":
 			if val, exists := s.data[op.Key]; exists {
-				if queueValue, ok := val.(*QueueValue); ok {
+				if queueValue, ok := val.(*DataTypeValue.QueueValue); ok {
 					if len(queueValue.Data) > 0 {
 						queueValue.Data = queueValue.Data[1:]
 					}
@@ -572,25 +574,25 @@ func (s *Store) LoadFromAOF(filepath string) error {
 
 		case "PUSH":
 			if _, exists := s.data[op.Key]; !exists {
-				s.data[op.Key] = &StackValue{Data: make([]string, 0)}
+				s.data[op.Key] = &DataTypeValue.StackValue{Data: make([]string, 0)}
 			}
 
-			if val, ok := s.data[op.Key].(*StackValue); ok {
+			if val, ok := s.data[op.Key].(*DataTypeValue.StackValue); ok {
 				val.Data = append(val.Data, op.Value)
 			}
 
 		case "POP":
 			if val, exists := s.data[op.Key]; exists {
-				if val, ok := val.(*StackValue); ok && len(val.Data) > 0 {
+				if val, ok := val.(*DataTypeValue.StackValue); ok && len(val.Data) > 0 {
 					val.Data = val.Data[:len(val.Data)-1]
 				}
 			}
 
 		case "HSET":
 			if _, exists := s.data[op.Key]; !exists {
-				s.data[op.Key] = &HashmapValue{Data: make(map[string]string)}
+				s.data[op.Key] = &DataTypeValue.HashmapValue{Data: make(map[string]string)}
 			}
-			if hashVal, ok := s.data[op.Key].(*HashmapValue); ok {
+			if hashVal, ok := s.data[op.Key].(*DataTypeValue.HashmapValue); ok {
 				var payload HSetPayload
 				if err := json.Unmarshal([]byte(op.Value), &payload); err == nil {
 					hashVal.Data[payload.Field] = payload.Value
@@ -608,4 +610,12 @@ func (s *Store) LoadFromAOF(filepath string) error {
 	}
 	logger.Info("AOF loaded successfully")
 	return nil
+}
+
+// Snapshot triggers AOF snapshot generation
+func (s *Store) Snapshot() error {
+	if !s.enableAof {
+		return fmt.Errorf("AOF is not enabled")
+	}
+	return s.aof.Snapshot(s)
 }
