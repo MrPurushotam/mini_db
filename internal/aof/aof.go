@@ -2,10 +2,13 @@ package aof
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mrpurushotam/mini_db/internal/domain"
 	"github.com/mrpurushotam/mini_db/internal/logger"
@@ -21,6 +24,21 @@ type AOF struct {
 	writer *bufio.Writer
 	mu     sync.Mutex
 }
+
+type Operation struct {
+	Type      string `json:"op"`
+	Key       string `json:"key"`
+	ValueType string `json:"valueType"`
+	Value     string `json:"value"`
+}
+
+type AOFHeader struct {
+	Format   string `json:"format"`
+	Version  string `json:"version"`
+	Encoding string `json:"encoding"`
+}
+
+const defaultSnapshotEntryThreshold = 100
 
 // NewAOF Creates / open filepath
 func NewAOF(filepath string) (*AOF, error) {
@@ -45,6 +63,19 @@ func (a *AOF) Snapshot(store StoreReader) error {
 	defer a.mu.Unlock()
 
 	logger.Info("Building AOF Snapshot...")
+	if a.file != nil {
+		_ = a.writer.Flush()
+		_ = a.file.Sync()
+
+		count, err := countAOFEntries(a.file, defaultSnapshotEntryThreshold)
+
+		if err != nil {
+			logger.Error("failed to count AOF entries", "error", err)
+		} else if count < defaultSnapshotEntryThreshold {
+			logger.Info("Skipping snapshot. AOF entires are below threshold", "entries", count)
+			return nil
+		}
+	}
 
 	// Create a new temp file
 	originalPath := a.file.Name()
@@ -56,15 +87,41 @@ func (a *AOF) Snapshot(store StoreReader) error {
 	defer tempFile.Close()
 
 	tempWriter := bufio.NewWriter(tempFile)
+
+	// Version control of aof snapshot
+	hdr := AOFHeader{
+		Format:   "aof",
+		Version:  time.Now().UTC().Format(time.RFC3339Nano),
+		Encoding: "json-lines",
+	}
+	hd, err := json.Marshal(hdr)
+	if err != nil {
+		tempFile.Close()
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to marshal AOF header: %w", err)
+	}
+	if _, err := tempWriter.Write(append(hd, '\n')); err != nil {
+		tempFile.Close()
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to write AOF header: %w", err)
+	}
+
 	snapshot := store.GetAll()
-
 	for key, value := range snapshot {
-		line := fmt.Sprintf("SET %s %s %s\n",
-			key,
-			value.Type(),
-			string(value.Serialize()))
+		op := Operation{
+			Type:      "SET",
+			Key:       key,
+			ValueType: string(value.Type()),
+			Value:     string(value.Serialize()),
+		}
+		b, err := json.Marshal(op)
+		if err != nil {
+			tempFile.Close()
+			os.Remove(tempPath)
+			return fmt.Errorf("failed to marshal snapshot op: %w", err)
+		}
 
-		if _, err := tempWriter.WriteString(line); err != nil {
+		if _, err := tempWriter.Write(append(b, '\n')); err != nil {
 			tempFile.Close()
 			os.Remove(tempPath)
 			return fmt.Errorf("failed to write snapshot: %w", err)
@@ -114,14 +171,57 @@ func (a *AOF) Snapshot(store StoreReader) error {
 	return nil
 }
 
+func countAOFEntries(f *os.File, limit int) (int, error) {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return 0, err
+	}
+	scanner := bufio.NewScanner(f)
+	count := 0
+	firstLine := true
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if firstLine {
+			firstLine = false
+			if strings.HasPrefix(line, "{") {
+				var hdr AOFHeader
+				if err := json.Unmarshal([]byte(line), &hdr); err != nil {
+					continue
+				}
+			}
+		}
+		count++
+		if limit > 0 && count > limit {
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return count, err
+	}
+	return count, nil
+}
+
 func (a *AOF) Write(operation, key, valueType, value string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	line := fmt.Sprintf("%s %s %s %s\n", operation, key, valueType, value)
+	op := Operation{
+		Type:      operation,
+		Key:       key,
+		ValueType: valueType,
+		Value:     value,
+	}
+	b, err := json.Marshal(op)
+	if err != nil {
+		logger.Error("failed to marshal AOF operation", "error", err)
+		return fmt.Errorf("failed to marshal AOF operation: %w", err)
+	}
+
 	logger.Debug("writing to AOF", "operation", operation, "key", key, "valueType", valueType)
 
-	if _, err := a.writer.WriteString(line); err != nil {
+	if _, err := a.writer.Write(append(b, '\n')); err != nil {
 		logger.Error("failed to write to AOF", "error", err)
 		return fmt.Errorf("failed to write to AOF: %w", err)
 	}
@@ -150,13 +250,6 @@ func (a *AOF) Close() error {
 	return a.file.Close()
 }
 
-type Operation struct {
-	Type      string
-	Key       string
-	ValueType string
-	Value     string
-}
-
 func (a *AOF) Read(filepath string) ([]Operation, error) {
 	file, err := os.Open(filepath)
 	if err != nil {
@@ -173,12 +266,25 @@ func (a *AOF) Read(filepath string) ([]Operation, error) {
 	scanner := bufio.NewScanner(file)
 
 	lineNum := 0
+	firstLine := true
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
 
 		if strings.TrimSpace(line) == "" {
 			continue
+		}
+
+		if firstLine {
+			firstLine = false
+			trim := strings.TrimSpace(line)
+			if strings.HasPrefix(trim, "{") {
+				var hdr AOFHeader
+				if err := json.Unmarshal([]byte(trim), &hdr); err == nil && hdr.Format == "aof" {
+					logger.Info("AOF header detected", "version", hdr.Version)
+					continue
+				}
+			}
 		}
 
 		op, err := parseOperation(line)
@@ -198,25 +304,51 @@ func (a *AOF) Read(filepath string) ([]Operation, error) {
 }
 
 func parseOperation(line string) (Operation, error) {
+	trimmed := strings.TrimSpace(line)
+	logger.Debug("parsing operation", "line", line)
+
+	// Try JSON (new format) first
+	if strings.HasPrefix(trimmed, "{") {
+		var op Operation
+		if err := json.Unmarshal([]byte(trimmed), &op); err == nil {
+			if op.Type == "" || op.Key == "" {
+				return Operation{}, fmt.Errorf("invalid JSON operation: %s", line)
+			}
+			logger.Debug("operation parsed (json)", "type", op.Type, "key", op.Key, "valueType", op.ValueType, "valueLength", len(op.Value))
+			return op, nil
+		}
+		logger.Debug("failed to unmarshal JSON AOF op, falling back to legacy parser")
+	}
+
+	// legacy format: split by spaces into max 4 parts
 	parts := strings.SplitN(line, " ", 4)
-	logger.Debug("parsing operation", "line", line, "partsCount", len(parts))
+	logger.Debug("parsing operation (legacy)", "line", line, "partsCount", len(parts))
 
 	if len(parts) < 2 {
 		return Operation{}, fmt.Errorf("invalid operation format %s", line)
 	}
 
+	var valueType, value string
+	if len(parts) >= 3 {
+		valueType = parts[2]
+	}
+	if len(parts) == 4 {
+		value = parts[3]
+	}
+
 	op := Operation{
 		Type:      parts[0],
 		Key:       parts[1],
-		ValueType: parts[2],
-		Value:     parts[3],
+		ValueType: valueType,
+		Value:     value,
 	}
 
 	if op.Type == "SET" {
-		if len(parts) != 4 {
+		if parts[2] == "" || parts[3] == "" {
 			return Operation{}, fmt.Errorf("SET operation missing value type or value: %s", line)
 		}
 	}
-	logger.Debug("operation parsed", "type", op.Type, "key", op.Key, "valueType", op.ValueType, "valueLength", len(op.Value))
+
+	logger.Debug("operation parsed (legacy)", "type", op.Type, "key", op.Key, "valueType", op.ValueType, "valueLength", len(op.Value))
 	return op, nil
 }
