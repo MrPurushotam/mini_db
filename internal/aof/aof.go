@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"sync"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/mrpurushotam/mini_db/internal/domain"
 	"github.com/mrpurushotam/mini_db/internal/logger"
+	valuepkg "github.com/mrpurushotam/mini_db/internal/value"
 )
 
 // StoreReader defines what AOF needs from the store (no import!)
@@ -38,8 +38,6 @@ type AOFHeader struct {
 	Encoding string `json:"encoding"`
 }
 
-const defaultSnapshotEntryThreshold = 100
-
 // NewAOF Creates / open filepath
 func NewAOF(filepath string) (*AOF, error) {
 	file, err := os.OpenFile(filepath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -63,19 +61,6 @@ func (a *AOF) Snapshot(store StoreReader) error {
 	defer a.mu.Unlock()
 
 	logger.Info("Building AOF Snapshot...")
-	if a.file != nil {
-		_ = a.writer.Flush()
-		_ = a.file.Sync()
-
-		count, err := countAOFEntries(a.file, defaultSnapshotEntryThreshold)
-
-		if err != nil {
-			logger.Error("failed to count AOF entries", "error", err)
-		} else if count < defaultSnapshotEntryThreshold {
-			logger.Info("Skipping snapshot. AOF entires are below threshold", "entries", count)
-			return nil
-		}
-	}
 
 	// Create a new temp file
 	originalPath := a.file.Name()
@@ -108,23 +93,178 @@ func (a *AOF) Snapshot(store StoreReader) error {
 
 	snapshot := store.GetAll()
 	for key, value := range snapshot {
-		op := Operation{
-			Type:      "SET",
-			Key:       key,
-			ValueType: string(value.Type()),
-			Value:     string(value.Serialize()),
-		}
-		b, err := json.Marshal(op)
-		if err != nil {
-			tempFile.Close()
-			os.Remove(tempPath)
-			return fmt.Errorf("failed to marshal snapshot op: %w", err)
-		}
+		// Emit operations according to the value type so replay reconstructs the correct data structures
+		switch value.Type() {
+		case domain.String:
+			op := Operation{Type: "SET", Key: key, ValueType: string(domain.String), Value: string(value.Serialize())}
+			b, err := json.Marshal(op)
+			if err != nil {
+				tempFile.Close()
+				os.Remove(tempPath)
+				return fmt.Errorf("failed to marshal snapshot op: %w", err)
+			}
+			if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+				tempFile.Close()
+				os.Remove(tempPath)
+				return fmt.Errorf("failed to write snapshot: %w", err)
+			}
 
-		if _, err := tempWriter.Write(append(b, '\n')); err != nil {
-			tempFile.Close()
-			os.Remove(tempPath)
-			return fmt.Errorf("failed to write snapshot: %w", err)
+		case domain.Set:
+			var sv valuepkg.SetValue
+			if err := sv.Deserialize(value.Serialize()); err != nil {
+				// fallback: write as SET with serialized value
+				op := Operation{Type: "SET", Key: key, ValueType: string(domain.Set), Value: string(value.Serialize())}
+				b, _ := json.Marshal(op)
+				if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to write snapshot: %w", err)
+				}
+				break
+			}
+			for member := range sv.Data {
+				op := Operation{Type: "SADD", Key: key, ValueType: string(domain.Set), Value: member}
+				b, err := json.Marshal(op)
+				if err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to marshal snapshot op: %w", err)
+				}
+				if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to write snapshot: %w", err)
+				}
+			}
+
+		case domain.List:
+			var lv valuepkg.ListValue
+			if err := lv.Deserialize(value.Serialize()); err != nil {
+				op := Operation{Type: "SET", Key: key, ValueType: string(domain.List), Value: string(value.Serialize())}
+				b, _ := json.Marshal(op)
+				if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to write snapshot: %w", err)
+				}
+				break
+			}
+			// use RPUSH to preserve order
+			for _, item := range lv.Data {
+				op := Operation{Type: "RPUSH", Key: key, ValueType: string(domain.List), Value: item}
+				b, err := json.Marshal(op)
+				if err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to marshal snapshot op: %w", err)
+				}
+				if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to write snapshot: %w", err)
+				}
+			}
+
+		case domain.Queue:
+			var qv valuepkg.QueueValue
+			if err := qv.Deserialize(value.Serialize()); err != nil {
+				op := Operation{Type: "SET", Key: key, ValueType: string(domain.Queue), Value: string(value.Serialize())}
+				b, _ := json.Marshal(op)
+				if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to write snapshot: %w", err)
+				}
+				break
+			}
+			for _, item := range qv.Data {
+				op := Operation{Type: "ENQUEUE", Key: key, ValueType: string(domain.Queue), Value: item}
+				b, err := json.Marshal(op)
+				if err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to marshal snapshot op: %w", err)
+				}
+				if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to write snapshot: %w", err)
+				}
+			}
+
+		case domain.Stack:
+			var sv valuepkg.StackValue
+			if err := sv.Deserialize(value.Serialize()); err != nil {
+				op := Operation{Type: "SET", Key: key, ValueType: string(domain.Stack), Value: string(value.Serialize())}
+				b, _ := json.Marshal(op)
+				if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to write snapshot: %w", err)
+				}
+				break
+			}
+			for _, item := range sv.Data {
+				op := Operation{Type: "PUSH", Key: key, ValueType: string(domain.Stack), Value: item}
+				b, err := json.Marshal(op)
+				if err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to marshal snapshot op: %w", err)
+				}
+				if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to write snapshot: %w", err)
+				}
+			}
+
+		case domain.Hashmap:
+			var hv valuepkg.HashmapValue
+			if err := hv.Deserialize(value.Serialize()); err != nil {
+				op := Operation{Type: "SET", Key: key, ValueType: string(domain.Hashmap), Value: string(value.Serialize())}
+				b, _ := json.Marshal(op)
+				if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to write snapshot: %w", err)
+				}
+				break
+			}
+			for field, val := range hv.Data {
+				payload := struct {
+					F string `json:"f"`
+					V string `json:"v"`
+				}{F: field, V: val}
+				pdata, _ := json.Marshal(payload)
+				op := Operation{Type: "HSET", Key: key, ValueType: string(domain.Hashmap), Value: string(pdata)}
+				b, err := json.Marshal(op)
+				if err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to marshal snapshot op: %w", err)
+				}
+				if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+					tempFile.Close()
+					os.Remove(tempPath)
+					return fmt.Errorf("failed to write snapshot: %w", err)
+				}
+			}
+
+		default:
+			// fallback to SET if unknown type
+			op := Operation{Type: "SET", Key: key, ValueType: string(value.Type()), Value: string(value.Serialize())}
+			b, err := json.Marshal(op)
+			if err != nil {
+				tempFile.Close()
+				os.Remove(tempPath)
+				return fmt.Errorf("failed to marshal snapshot op: %w", err)
+			}
+			if _, err := tempWriter.Write(append(b, '\n')); err != nil {
+				tempFile.Close()
+				os.Remove(tempPath)
+				return fmt.Errorf("failed to write snapshot: %w", err)
+			}
 		}
 	}
 
@@ -169,38 +309,6 @@ func (a *AOF) Snapshot(store StoreReader) error {
 
 	logger.Info("AOF snapshot completed successfully")
 	return nil
-}
-
-func countAOFEntries(f *os.File, limit int) (int, error) {
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return 0, err
-	}
-	scanner := bufio.NewScanner(f)
-	count := 0
-	firstLine := true
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		if firstLine {
-			firstLine = false
-			if strings.HasPrefix(line, "{") {
-				var hdr AOFHeader
-				if err := json.Unmarshal([]byte(line), &hdr); err != nil {
-					continue
-				}
-			}
-		}
-		count++
-		if limit > 0 && count > limit {
-			break
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return count, err
-	}
-	return count, nil
 }
 
 func (a *AOF) Write(operation, key, valueType, value string) error {

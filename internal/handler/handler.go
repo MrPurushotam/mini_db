@@ -2,8 +2,10 @@ package handler
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/mrpurushotam/mini_db/internal/domain"
 	"github.com/mrpurushotam/mini_db/internal/logger"
 	"github.com/mrpurushotam/mini_db/internal/store"
+	valuepkg "github.com/mrpurushotam/mini_db/internal/value"
 )
 
 type Handler struct {
@@ -49,7 +51,55 @@ func (h *Handler) Get(c *fiber.Ctx) error {
 }
 
 func (h *Handler) GetAll(c *fiber.Ctx) error {
-	values := h.Store.GetAll()
+	raw := h.Store.GetAll()
+	values := make(map[string]interface{}, len(raw))
+	for k, v := range raw {
+		switch v.Type() {
+		case domain.String:
+			values[k] = string(v.Serialize())
+		case domain.Set:
+			var sv valuepkg.SetValue
+			if err := sv.Deserialize(v.Serialize()); err == nil {
+				members := make([]string, 0, len(sv.Data))
+				for m := range sv.Data {
+					members = append(members, m)
+				}
+				values[k] = members
+			} else {
+				values[k] = string(v.Serialize())
+			}
+		case domain.List:
+			var lv valuepkg.ListValue
+			if err := lv.Deserialize(v.Serialize()); err == nil {
+				values[k] = lv.Data
+			} else {
+				values[k] = string(v.Serialize())
+			}
+		case domain.Queue:
+			var qv valuepkg.QueueValue
+			if err := qv.Deserialize(v.Serialize()); err == nil {
+				values[k] = qv.Data
+			} else {
+				values[k] = string(v.Serialize())
+			}
+		case domain.Stack:
+			var st valuepkg.StackValue
+			if err := st.Deserialize(v.Serialize()); err == nil {
+				values[k] = st.Data
+			} else {
+				values[k] = string(v.Serialize())
+			}
+		case domain.Hashmap:
+			var hv valuepkg.HashmapValue
+			if err := hv.Deserialize(v.Serialize()); err == nil {
+				values[k] = hv.Data
+			} else {
+				values[k] = string(v.Serialize())
+			}
+		default:
+			values[k] = string(v.Serialize())
+		}
+	}
 	logger.Info("Retrieved all values", "count", len(values))
 	return c.Status(200).JSON(fiber.Map{"status": "success", "message": "Value fetched.", "values": values})
 }
@@ -61,7 +111,55 @@ func (h *Handler) GetAllKeys(c *fiber.Ctx) error {
 }
 
 func (h *Handler) GetAllValues(c *fiber.Ctx) error {
-	values := h.Store.GetAllValues()
+	raw := h.Store.GetAllValues()
+	values := make([]interface{}, 0, len(raw))
+	for _, v := range raw {
+		switch v.Type() {
+		case domain.String:
+			values = append(values, string(v.Serialize()))
+		case domain.Set:
+			var sv valuepkg.SetValue
+			if err := sv.Deserialize(v.Serialize()); err == nil {
+				members := make([]string, 0, len(sv.Data))
+				for m := range sv.Data {
+					members = append(members, m)
+				}
+				values = append(values, members)
+			} else {
+				values = append(values, string(v.Serialize()))
+			}
+		case domain.List:
+			var lv valuepkg.ListValue
+			if err := lv.Deserialize(v.Serialize()); err == nil {
+				values = append(values, lv.Data)
+			} else {
+				values = append(values, string(v.Serialize()))
+			}
+		case domain.Queue:
+			var qv valuepkg.QueueValue
+			if err := qv.Deserialize(v.Serialize()); err == nil {
+				values = append(values, qv.Data)
+			} else {
+				values = append(values, string(v.Serialize()))
+			}
+		case domain.Stack:
+			var st valuepkg.StackValue
+			if err := st.Deserialize(v.Serialize()); err == nil {
+				values = append(values, st.Data)
+			} else {
+				values = append(values, string(v.Serialize()))
+			}
+		case domain.Hashmap:
+			var hv valuepkg.HashmapValue
+			if err := hv.Deserialize(v.Serialize()); err == nil {
+				values = append(values, hv.Data)
+			} else {
+				values = append(values, string(v.Serialize()))
+			}
+		default:
+			values = append(values, string(v.Serialize()))
+		}
+	}
 	logger.Info("Retrieved all values (only values)", "count", len(values))
 	return c.Status(200).JSON(fiber.Map{"status": "success", "values": values})
 }
