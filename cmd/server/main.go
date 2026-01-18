@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-lambda-go/lambda"
+	fiberadapter "github.com/awslabs/aws-lambda-go-api-proxy/fiber"
 	"github.com/gofiber/fiber/v2"
 	fiberLogger "github.com/gofiber/fiber/v2/middleware/logger"
 	config "github.com/mrpurushotam/mini_db/internal"
@@ -74,7 +76,13 @@ func main() {
 			}
 		}()
 	}
-
 	logger.Info("starting server", "port", cfg.Port)
+
+	if cfg.AWS_LAMBDA_FUNCTION_NAME != "" {
+		adapter := fiberadapter.New(app)
+		lambda.Start(adapter.ProxyWithContext)
+		return
+	}
+
 	log.Fatal(app.Listen(":" + cfg.Port))
 }

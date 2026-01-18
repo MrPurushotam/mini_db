@@ -1,0 +1,75 @@
+name: Deploy to AWS Lambda
+
+on:
+  push:
+    branches:
+      - main # change this if you want deploys on other branches
+
+jobs:
+  build-and-deploy:
+    name: Build, test, and deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24"
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build linux binary
+        run: |
+          echo "Building for Linux..."
+          env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o main ./cmd/server
+
+      - name: Zip binary
+        run: |
+          zip -r function.zip main
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Create or update Lambda function
+        env:
+          FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
+          LAMBDA_ROLE_ARN: ${{ secrets.LAMBDA_ROLE_ARN }}
+        run: |
+          set -e
+          if aws lambda get-function --function-name "$FUNCTION_NAME" >/dev/null 2>&1; then
+            echo "Function exists — updating code"
+            aws lambda update-function-code --function-name "$FUNCTION_NAME" --zip-file fileb://function.zip
+            echo "Updating function configuration (environment variables)"
+            aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --environment "Variables={AWS_LAMBDA_FUNCTION_NAME=$FUNCTION_NAME}"
+          else
+            echo "Function not found — creating function"
+            if [ -z "$LAMBDA_ROLE_ARN" ]; then
+              echo "LAMBDA_ROLE_ARN secret is required to create a new function"
+              exit 1
+            fi
+            aws lambda create-function --function-name "$FUNCTION_NAME" --zip-file fileb://function.zip --handler main --runtime go1.x --role "$LAMBDA_ROLE_ARN"
+            aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --environment "Variables={AWS_LAMBDA_FUNCTION_NAME=$FUNCTION_NAME}"
+          fi
+
+      - name: Done
+        run: echo "Deployment finished"
