@@ -61,6 +61,8 @@ jobs:
             echo "Function exists — updating code"
             aws lambda update-function-code --function-name "$FUNCTION_NAME" --zip-file fileb://function.zip
             
+            aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+
             echo "Updating function configuration (environment variables)"
             aws lambda update-function-configuration \
               --function-name "$FUNCTION_NAME" \
@@ -80,6 +82,9 @@ jobs:
               --handler main \
               --runtime go1.x \
               --role "$LAMBDA_ROLE_ARN"
+
+            aws lambda wait function-active \
+              --function-name "$FUNCTION_NAME"
 
             aws lambda update-function-configuration \
               --function-name "$FUNCTION_NAME" \
