@@ -54,22 +54,36 @@ jobs:
         env:
           FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
           LAMBDA_ROLE_ARN: ${{ secrets.LAMBDA_ROLE_ARN }}
+          APP_FUNCTION_NAME: ${{ secrets.APP_FUNCTION_NAME }}
         run: |
           set -e
           if aws lambda get-function --function-name "$FUNCTION_NAME" >/dev/null 2>&1; then
             echo "Function exists — updating code"
             aws lambda update-function-code --function-name "$FUNCTION_NAME" --zip-file fileb://function.zip
+            
             echo "Updating function configuration (environment variables)"
-            aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --environment "Variables={AWS_LAMBDA_FUNCTION_NAME=$FUNCTION_NAME}"
+            aws lambda update-function-configuration \
+              --function-name "$FUNCTION_NAME" \
+              --environment "Variables={APP_FUNCTION_NAME=$APP_FUNCTION_NAME}"
+
           else
             echo "Function not found — creating function"
+
             if [ -z "$LAMBDA_ROLE_ARN" ]; then
               echo "LAMBDA_ROLE_ARN secret is required to create a new function"
               exit 1
             fi
-            aws lambda create-function --function-name "$FUNCTION_NAME" --zip-file fileb://function.zip --handler main --runtime go1.x --role "$LAMBDA_ROLE_ARN"
-            aws lambda update-function-configuration --function-name "$FUNCTION_NAME" --environment "Variables={AWS_LAMBDA_FUNCTION_NAME=$FUNCTION_NAME}"
-          fi
 
+            aws lambda create-function \
+              --function-name "$FUNCTION_NAME" \
+              --zip-file fileb://function.zip \
+              --handler main \
+              --runtime go1.x \
+              --role "$LAMBDA_ROLE_ARN"
+
+            aws lambda update-function-configuration \
+              --function-name "$FUNCTION_NAME" \
+              --environment "Variables={APP_FUNCTION_NAME=$APP_FUNCTION_NAME}"
+          fi
       - name: Done
         run: echo "Deployment finished"
